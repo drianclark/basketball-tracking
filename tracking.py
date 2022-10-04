@@ -1,4 +1,5 @@
 from datetime import datetime
+import numpy as np
 import cv2
 
 VIDEO_FILE = "trimmed.mp4"
@@ -54,6 +55,18 @@ def saveTimeStampsToFile(outfile_prefix, time_stamps):
     with open(outfile, 'w+') as f:
         for time_stamp in time_stamps:
             f.write(f"{time_stamp}\n")
+            
+def detectCircles(frame):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.medianBlur(gray, 5)
+        
+    rows = gray.shape[0]
+    circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 1, rows / 8,
+                            param1=100, param2=30,
+                            minRadius=1, maxRadius=30)
+    
+    return circles
+            
     
 def main(filename):
     roi_x, roi_y, roi_w, roi_h = getROI(filename)
@@ -97,8 +110,19 @@ def main(filename):
                 cv2.drawContours(roi, [c], -1, (0, 255, 0), 2)
                 x, y, w, h = cv2.boundingRect(c)
                 cv2.rectangle(roi, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                print("Shot detected at", f"{convertToMMSS(current_time)}")
-                time_stamps.append(current_time)
+                
+                circles = detectCircles(roi)
+                
+                if circles is not None:
+                    circles = np.uint16(np.around(circles))
+                    for i in circles[0, :]:
+                        centre = (i[0], i[1])
+                        radius = i[2]
+                        cv2.circle(roi, centre, radius, (255, 0, 255), 3)
+                        print(f"Found circle with center {centre}")
+                
+                # print("Shot detected at", f"{convertToMMSS(current_time)}")
+                # time_stamps.append(current_time)
 
         cv2.namedWindow("ROI", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("ROI", roi_w * 2, roi_h * 2)
