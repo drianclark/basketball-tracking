@@ -1,19 +1,22 @@
-from calendar import c
 from datetime import datetime
+from fileinput import filename
+from time import perf_counter
 import cv2
 import os
 import ffmpeg
 
-VIDEO_FILE = "clip_trimmed_test.mp4"
+FOLDER = "to_process"
 
-def convertToMMSS(seconds):
+def convertToHHMMSS(seconds):
+    hours = int(seconds // 3600)
     minutes =  int(seconds // 60)
     seconds = int(seconds % 60)
                 
+    padded_hours = str(hours).zfill(2)
     padded_minutes = str(minutes).zfill(2)
     padded_seconds = str(seconds).zfill(2)
             
-    return f"{padded_minutes}:{padded_seconds}"
+    return f"{padded_hours}:{padded_minutes}:{padded_seconds}"
 
 def frameToTimestamp(fps, frame_number):
     return frame_number/fps
@@ -42,9 +45,8 @@ def getInOutTimestamps(array, threshold, predelay, release, source_duration):
     # [[1,2,2,3], [7,8,8]] => [[1,3],[7,8]]
     in_out_timestamps = [[min(x), max(x)] for x in grouped_timestamps]
     
-    
-    # add predelay p (include p seconds before start) and release r (include r seconds) after end 
-    # but ensure we don't go past the beginning (0s) and end of the video (duration)
+    # add predelay p (include p seconds before start) and release r (include r seconds after end) 
+    # but ensure we don't go past the beginning (0s) and end (duration) of the video
     add_predelay_and_release = lambda in_out, predelay, release: [int(max(0, in_out[0]-predelay)), int(min(in_out[1]+release, source_duration))]
     in_out_timestamps_with_predelay_and_release = list(map(lambda x: add_predelay_and_release(x, predelay, release), in_out_timestamps))
     
@@ -75,29 +77,39 @@ def saveTimeStampsToFile(outfile_prefix, time_stamps):
         for time_stamp in time_stamps:
             f.write(f"{time_stamp}\n")
             
-def trim_video(in_file, out_file, start, end, fps):
-    if os.path.exists(out_file):
-        os.remove(out_file)
-
-    input_stream = ffmpeg.input(in_file)
-
-    pts = "PTS-STARTPTS"
-    video = input_stream.filter('fps', fps=fps, round='up').trim(start=start, end=end).setpts(pts)
-    audio = (input_stream
-            .filter_("atrim", start, end)
-            .filter_("asetpts", pts))
+def extractClips(folder, in_file, in_out_timestamps, fps):
+    filename_without_extension = in_file.split(".")[0]
     
-    video_and_audio = ffmpeg.concat(video, audio, v=1, a=1)
-    output = ffmpeg.output(video_and_audio, out_file)
-    output.run()
+    if not os.path.exists(f"{folder}/{filename_without_extension}"):
+        os.mkdir(f"{folder}/{filename_without_extension}")
+    
+    for (index, (in_time, out_time)) in enumerate(in_out_timestamps):
+        print(f"Trimming clip {index + 1} of {len(in_out_timestamps)}")
+        
+        in_time_hours, in_time_minutes, in_time_seconds = list(map(int, in_time.split(":")))
+        in_seconds = in_time_hours * 3600 + in_time_minutes * 60 + in_time_seconds
+        
+        out_time_hours, out_time_minutes, out_time_seconds = list(map(int, out_time.split(":")))
+        out_seconds = out_time_hours * 3600 + out_time_minutes * 60 + out_time_seconds
+        
+        out_file = f"{folder}/{filename_without_extension}/{filename_without_extension}_{in_seconds}-{out_seconds}.mp4"
+        
+        if os.path.exists(out_file):
+            os.remove(out_file)
+            
+        input_stream = ffmpeg.input(f"{folder}/{in_file}", ss=in_time, to=out_time)
+        output = ffmpeg.output(input_stream, out_file, vcodec='copy', acodec='copy')
+        output.run()
 
-
-def main(filename):
-    roi_x, roi_y, roi_w, roi_h = getROI(filename)
+def process_video(folder, filename, roi):
+    roi_x, roi_y, roi_w, roi_h = roi
+    
+    filename_without_extension = filename.split(".")[0]
+    file_path = f"{folder}/{filename}"
     
     time_stamps = []
 
-    cap = cv2.VideoCapture(filename)
+    cap = cv2.VideoCapture(file_path)
     FPS = cap.get(cv2.CAP_PROP_FPS)
     TOTAL_FRAMES = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     TOTAL_TIME_IN_SECONDS = frameToTimestamp(FPS, TOTAL_FRAMES)
@@ -113,7 +125,7 @@ def main(filename):
         current_time = frameToTimestamp(FPS, frame_number)
         
         if (frame_number % FPS == 0):
-            print(f"{convertToMMSS(current_time)} of {convertToMMSS(TOTAL_TIME_IN_SECONDS)}")
+            print(f"{convertToHHMMSS(current_time)} of {convertToHHMMSS(TOTAL_TIME_IN_SECONDS)}")
                     
         # Get next frame
         success, frame = cap.read()
@@ -139,7 +151,7 @@ def main(filename):
                 cv2.drawContours(roi, [c], -1, (0, 255, 0), 2)
                 x, y, w, h = cv2.boundingRect(c)
                 cv2.rectangle(roi, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                print("Shot detected at", f"{convertToMMSS(current_time)}")
+                print("Shot detected at", f"{convertToHHMMSS(current_time)}")
                 time_stamps.append(current_time)
 
         cv2.namedWindow("ROI", cv2.WINDOW_NORMAL)
@@ -155,17 +167,30 @@ def main(filename):
     cv2.destroyAllWindows()
 
     in_out_timestamps = getInOutTimestamps(time_stamps, 1, 4, 2, TOTAL_TIME_IN_SECONDS)
-    human_readable_time_stamps = [list(map(convertToMMSS, t)) for t in in_out_timestamps]
+    hh_mm_ss_time_stamps = [list(map(convertToHHMMSS, t)) for t in in_out_timestamps]
     
-    saveTimeStampsToFile(filename.split(".")[0], human_readable_time_stamps)
+    saveTimeStampsToFile(filename_without_extension, hh_mm_ss_time_stamps)
+    extractClips(folder, filename, hh_mm_ss_time_stamps, FPS)
     
-    filename_without_extension = filename.split(".")[0]
-    
-    for (index, (in_time, out_time)) in enumerate(in_out_timestamps):
-        print(f"Trimming clip {index + 1} of {len(in_out_timestamps)}")
-        trim_video(filename, f"{filename_without_extension}_{in_time}-{out_time}.mp4", in_time, out_time, FPS)
+    os.rename(file_path, f"{folder}/{filename_without_extension}/{filename}")
 
-    return(human_readable_time_stamps)
+    return hh_mm_ss_time_stamps
 
+def main(folder):
+    files = [item for item in os.listdir(folder) if item.lower().endswith(".mp4")]
+        
+    rois = dict()
+        
+    for file in files:
+        roi_x, roi_y, roi_w, roi_h = getROI(f"{folder}/{file}")
+        rois[file] = (roi_x, roi_y, roi_w, roi_h)
+            
+    for file in files:
+        process_video(folder, file, rois[file])
+    
 if __name__ == "__main__":
-    main(VIDEO_FILE)
+    start = perf_counter()
+    main(FOLDER)
+    end = perf_counter()
+    print(f"Elapsed time: {end-start}")
+    
