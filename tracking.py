@@ -1,11 +1,11 @@
 from datetime import datetime
-from fileinput import filename
+import random
 from time import perf_counter
 import cv2
 import os
 import ffmpeg
 
-FOLDER = "to_process"
+FOLDER = r"E:\Basketball Highlights\2023-02-25"
 
 def convertToHHMMSS(seconds):
     hours = int(seconds // 3600)
@@ -55,9 +55,9 @@ def getInOutTimestamps(array, threshold, predelay, release, source_duration):
 def getROI(filename):
     cap = cv2.VideoCapture(filename)
     TOTAL_FRAMES = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    median_frame = TOTAL_FRAMES // 2
+    random_frame = random.randrange(1, TOTAL_FRAMES)
     
-    cap.set(cv2.CAP_PROP_POS_FRAMES, median_frame)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, random_frame)
     success, frame = cap.read()
     
     if success:
@@ -92,14 +92,14 @@ def extractClips(folder, in_file, in_out_timestamps, fps):
         out_time_hours, out_time_minutes, out_time_seconds = list(map(int, out_time.split(":")))
         out_seconds = out_time_hours * 3600 + out_time_minutes * 60 + out_time_seconds
         
-        out_file = f"{folder}/{filename_without_extension}/{filename_without_extension}_{in_seconds}-{out_seconds}.mp4"
-        
+        out_file = f"{folder}\{filename_without_extension}\{filename_without_extension}_{in_seconds}-{out_seconds}.mp4"
         if os.path.exists(out_file):
             os.remove(out_file)
             
-        input_stream = ffmpeg.input(f"{folder}/{in_file}", ss=in_time, to=out_time)
+        input_stream = ffmpeg.input(f"{folder}\{in_file}", ss=in_time, to=out_time)
         output = ffmpeg.output(input_stream, out_file, vcodec='copy', acodec='copy')
-        output.run()
+        print(f"Extracting to {out_file} from {folder}\{in_file}")
+        output.run(quiet=True)
 
 def process_video(folder, filename, roi):
     roi_x, roi_y, roi_w, roi_h = roi
@@ -132,7 +132,7 @@ def process_video(folder, filename, roi):
         if not success:
             break
         
-        # HACK FOR NOW: skip every other frame to (source video is 50fps, 25fps should be more than enough
+        # HACK FOR NOW: skip every other frame to (source video is 24fps, 12fps should be more than enough
         # to-do: figure out how to implement frame skipping to emulate a lower source video fps
         if frame_number % 2 == 0:
             continue
@@ -169,7 +169,6 @@ def process_video(folder, filename, roi):
     in_out_timestamps = getInOutTimestamps(time_stamps, 1, 4, 2, TOTAL_TIME_IN_SECONDS)
     hh_mm_ss_time_stamps = [list(map(convertToHHMMSS, t)) for t in in_out_timestamps]
     
-    saveTimeStampsToFile(filename_without_extension, hh_mm_ss_time_stamps)
     extractClips(folder, filename, hh_mm_ss_time_stamps, FPS)
     
     os.rename(file_path, f"{folder}/{filename_without_extension}/{filename}")
