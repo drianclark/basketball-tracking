@@ -5,7 +5,7 @@ import cv2
 import os
 import ffmpeg
 
-FOLDER = r"E:\Basketball Highlights\2023-02-25"
+FOLDER = r"E:\Basketball Highlights\2023-04-27"
 
 def convertToHHMMSS(seconds):
     hours = int(seconds // 3600)
@@ -119,6 +119,8 @@ def process_video(folder, filename, roi):
     frame_number = 0
 
     success, frame = cap.read()
+    
+    print(f"Processing {file_path}")
 
     while True:
         frame_number += 1
