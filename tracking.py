@@ -4,8 +4,10 @@ from time import perf_counter
 import cv2
 import os
 import ffmpeg
+from multiprocessing import Pool, cpu_count
+from concurrent import futures
 
-FOLDER = r"E:\Basketball Highlights\2023-04-27"
+FOLDER = r"E:\Basketball Highlights\2023-10-21"
 
 def convertToHHMMSS(seconds):
     hours = int(seconds // 3600)
@@ -185,13 +187,15 @@ def main(folder):
     for file in files:
         roi_x, roi_y, roi_w, roi_h = getROI(f"{folder}/{file}")
         rois[file] = (roi_x, roi_y, roi_w, roi_h)
-            
-    for file in files:
-        process_video(folder, file, rois[file])
-    
-if __name__ == "__main__":
+        
     start = perf_counter()
-    main(FOLDER)
+    with futures.ProcessPoolExecutor(max_workers=4) as executor:
+        results = [executor.submit(process_video, folder, file, rois[file]) for file in files]
+    
+        futures.wait(results)
+        
     end = perf_counter()
     print(f"Elapsed time: {end-start}")
     
+if __name__ == "__main__":
+    main(FOLDER)
